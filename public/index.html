@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B-Techflow Inventory</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --surface: #ffffff; --text: #1b2430; --muted: #66707d;
+    --line: #dde1e7; --accent: #1f5eff; --danger: #c93636;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161c; --surface: #1b212a; --text: #e8ecf1; --muted: #98a2b0;
+      --line: #2c3541; --accent: #6b93ff; --danger: #ff7a7a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--text); line-height: 1.5; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .panel { background: var(--surface); border: 1px solid var(--line);
+           border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+  h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
+  input { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px;
+          background: var(--bg); color: var(--text); font: inherit; }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .full { grid-column: 1 / -1; }
+  .actions { margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap; }
+  button { font: inherit; padding: 9px 16px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--surface); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--danger); }
+  #message { min-height: 1.4em; margin-top: 10px; font-size: .9rem; }
+  #message.error { color: var(--danger); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 560px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .85rem; color: var(--muted); font-weight: 600; }
+  td.row-actions { white-space: nowrap; }
+  td.row-actions button { padding: 5px 10px; font-size: .85rem; }
+  .empty { color: var(--muted); padding: 20px 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Product inventory</h1>
+  <p class="sub">Add, edit and remove products stored in the B-Techflow API.</p>
+
+  <section class="panel">
+    <h2 id="form-title">Add a product</h2>
+    <div class="grid">
+      <div><label for="name">Name</label><input id="name"></div>
+      <div><label for="price">Price</label><input id="price" type="number" min="0" step="0.01"></div>
+      <div><label for="quantity">Quantity</label><input id="quantity" type="number" min="0" step="1"></div>
+      <div><label for="category">Category</label><input id="category"></div>
+      <div class="full"><label for="description">Description</label><input id="description"></div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="save">Add product</button>
+      <button id="cancel" hidden>Cancel edit</button>
+    </div>
+    <div id="message" role="status"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Products</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Description</th><th>Price</th><th>Qty</th><th>Category</th><th></th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div id="empty" class="empty" hidden>No products yet. Add your first one above.</div>
+  </section>
+</main>
+
+<script>
+  const API = '/api/products';
+  const fields = ['name', 'description', 'price', 'quantity', 'category'];
+  const el = id => document.getElementById(id);
+  let editingId = null;
+  let products = [];
+
+  function say(text, isError) {
+    const m = el('message');
+    m.textContent = text;
+    m.className = isError ? 'error' : '';
+  }
+
+  function readForm() {
+    return {
+      name: el('name').value.trim(),
+      description: el('description').value.trim(),
+      price: Number(el('price').value),
+      quantity: Number(el('quantity').value),
+      category: el('category').value.trim()
+    };
+  }
+
+  function resetForm() {
+    fields.forEach(f => el(f).value = '');
+    editingId = null;
+    el('form-title').textContent = 'Add a product';
+    el('save').textContent = 'Add product';
+    el('cancel').hidden = true;
+  }
+
+  function render() {
+    const body = el('rows');
+    body.innerHTML = '';
+    el('empty').hidden = products.length > 0;
+    products.forEach(p => {
+      const tr = document.createElement('tr');
+      [p.name, p.description, p.price, p.quantity, p.category].forEach(v => {
+        const td = document.createElement('td');
+        td.textContent = v ?? '';
+        tr.appendChild(td);
+      });
+      const td = document.createElement('td');
+      td.className = 'row-actions';
+      const edit = document.createElement('button');
+      edit.textContent = 'Edit';
+      edit.onclick = () => startEdit(p);
+      const del = document.createElement('button');
+      del.textContent = 'Delete';
+      del.className = 'danger';
+      del.onclick = () => removeProduct(p);
+      td.append(edit, ' ', del);
+      tr.appendChild(td);
+      body.appendChild(tr);
+    });
+  }
+
+  async function load() {
+    try {
+      const res = await fetch(API);
+      const data = await res.json();
+      products = data.products || [];
+      render();
+    } catch (e) {
+      say('Could not load products. Is the server running?', true);
+    }
+  }
+
+  function startEdit(p) {
+    editingId = p.id;
+    fields.forEach(f => el(f).value = p[f] ?? '');
+    el('form-title').textContent = 'Edit product';
+    el('save').textContent = 'Save changes';
+    el('cancel').hidden = false;
+    say('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function save() {
+    const url = editingId ? `${API}/${editingId}` : API;
+    const method = editingId ? 'PUT' : 'POST';
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(readForm())
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) {
+        say(data.message || 'Could not save the product.', true);
+        return;
+      }
+      say(editingId ? 'Changes saved.' : 'Product added.');
+      resetForm();
+      load();
+    } catch (e) {
+      say('Could not reach the server.', true);
+    }
+  }
+
+  async function removeProduct(p) {
+    if (!confirm(`Delete "${p.name}"?`)) return;
+    try {
+      const res = await fetch(`${API}/${p.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || data.success === false) {
+        say(data.message || 'Could not delete the product.', true);
+        return;
+      }
+      say('Product deleted.');
+      load();
+    } catch (e) {
+      say('Could not reach the server.', true);
+    }
+  }
+
+  el('save').onclick = save;
+  el('cancel').onclick = () => { resetForm(); say(''); };
+  load();
+</script>
+</body>
+</html>

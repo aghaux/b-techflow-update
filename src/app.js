@@ -1,3 +1,4 @@
+const path = require("path");
 const express = require("express");
 const productRoutes = require("./routes/productRoutes");
 const errorHandler = require("./middleware/errorHandler");
@@ -6,6 +7,7 @@ const app = express();
 
 // Middleware to parse incoming JSON requests
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "..", "public")));
 
 // Basic welcome route
 app.get("/", (req, res) => {
